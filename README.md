@@ -110,7 +110,7 @@ UMR к единицам наблюдения по `assessment_mode`: `qa` — с
 ### Пример лога прогона
 
 Формат строк — из кода; значения условные. Все модули пишут в корневой
-логгер (`logging.info`), поэтому имя логгера — `root`.
+(`logging.getLogger(__name__)`).
 
 ```text
 INFO llm_val.valtest_local_drift_stability: Размер OOS (real): 266
