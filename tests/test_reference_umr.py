@@ -218,3 +218,19 @@ def test_descriptor_defaults_match_runtime_contract():
     )
     assert "monitoring_umr" in monitoring_port["description"]
     assert "parquet_test_dataset" not in monitoring_port["description"]
+
+
+def test_yellow_semaphore_is_published_as_amber_with_local_drift_title():
+    # Внутренний yellow должен уходить платформе как amber, а заголовок —
+    # описывать локальный дрифт, а не динамику КМ (LAIM-0004, LAIM-0045).
+    import main as drift
+
+    res = {"report": {"semaphore": "yellow"},
+           "precomputed": {"metric_value": 0.9, "metric_value_estimate": 0.7,
+                           "reliability": {"mean": 1.0, "share_below_threshold": 0.0}}}
+    result = drift.report_valtest_local_drift(res, drift._SEMAPHORE_TITLE["yellow"])
+    light = result["all_results"]
+    assert light["color"] == "amber"
+    assert light["calculated_traffic_lights"]["test_light"] == "amber"
+    assert "дрифт" in light["calculated_traffic_lights"]["semaphore_title"].lower()
+    assert "динамики ключевой метрики" not in light["calculated_traffic_lights"]["semaphore_title"]
