@@ -18,7 +18,7 @@ from llm_val.valtest_local_drift_stability import (
     MIN_OOS_SAMPLES,
     valtest_local_drift_stability,
 )
-from laim_monitoring import prepare_drift_frames
+from laim_monitoring import prepare_drift_frames, validate_monitoring_metric
 
 from html_report_helper import display_semaphore, show_criteria_semaphore
 
@@ -54,12 +54,12 @@ def html_report_valtest_local_drift(res, semaphore_title):
 
     green_criterion = (
         "Абсолютное снижение ключевой метрики менее 15 п.п. "
-        "И светофор OOT — «Зелёный»"
+        "И светофор метрики на OOS — «Зелёный»"
     )
     yellow_criterion = "Иначе"
     red_criterion = (
         "Абсолютное снижение ключевой метрики качества более 25 п.п. "
-        "ИЛИ светофор OOT — «Красный»"
+        "ИЛИ светофор метрики на OOS — «Красный»"
     )
     grey_criterion = (
         "Средний scoreANNi &lt; 0.2 ИЛИ доля непокрытых OOT-запросов &gt; 30%"
@@ -246,6 +246,29 @@ def main(
     - P1-6: literal_eval защищён от уже-готового dict/tuple
     - P1-7: dropna с subset
     """
+    contract = validate_monitoring_metric(monitoring_metric, require_computed=False)
+    if contract["status"] == "not_computable":
+        logger.warning(
+            "Локальный дрифт не вычисляется: %s",
+            contract.get("reason", "причина не указана"),
+        )
+        report_result = report_valtest_local_drift(
+            {
+                "report": {"semaphore": "gray"},
+                "precomputed": {"reason": contract.get("reason")},
+            },
+            _SEMAPHORE_TITLE["gray"],
+        )
+        report_result["all_results"].update(
+            reason_code=contract.get("reason_code"),
+            reason=contract.get("reason"),
+            test_name="local_drift",
+        )
+        return {
+            "all_results": report_result["all_results"],
+            "test_description": report_result["hidden_port"],
+        }
+
     # Защитный literal_eval
     if isinstance(data_types, str):
         data_types = literal_eval(data_types)
