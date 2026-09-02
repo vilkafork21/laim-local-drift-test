@@ -64,7 +64,7 @@ laim-kriteria-selector.validated_monitoring_metric ─┘         │
 ## Как проходит прогон
 
 ```text
-1. Контракт      validate_monitoring_metric; нормализация обоих UMR в drift-фреймы
+1. Контракт      validate_monitoring_metric; not_computable -> серый без чтения UMR
 2. Семплер       корзина -> OOS (train), мониторинг -> OOT (test); target -> float
 3. Гейт размера  OOS < 30 строк -> серый без обращения к GigaChat
 4. Метрика OOS   среднее main_metric корзины и его светофор по порогам (0.4, 0.6)
@@ -73,9 +73,11 @@ laim-kriteria-selector.validated_monitoring_metric ─┘         │
 7. Отчёт         цвет = худший из светофора OOS и светофора по снижению; HTML
 ```
 
-**1. Контракт.** `prepare_drift_frames` валидирует `monitoring_metric`
-(`require_computed=False`, но без `assessment_mode` — отказ) и приводит оба
-UMR к единицам наблюдения по `assessment_mode`: `qa` — строка,
+**1. Контракт.** `main` сначала валидирует `monitoring_metric`. При входном
+`status: not_computable` нода сразу возвращает серый результат с исходными
+`reason_code` и `reason`, не читая UMR и не создавая клиент GigaChat. Для
+вычислимого контракта `prepare_drift_frames` приводит оба UMR к единицам
+наблюдения по `assessment_mode`: `qa` — строка,
 `turn_with_history` — реплика с историей, `dialogue` — сессия. В drift-фрейм
 уходят `question` (для контекстных режимов — JSON-список `input_query`
 реплик), пустой `answer` и `target` = `main_metric`; в корзине `target`
@@ -109,8 +111,8 @@ UMR к единицам наблюдения по `assessment_mode`: `qa` — с
 
 ### Пример лога прогона
 
-Формат строк — из кода; значения условные. Все модули пишут в корневой
-(`logging.getLogger(__name__)`).
+Формат строк — из кода; значения условные. Модули пишут через логгер
+своего имени (`logging.getLogger(__name__)`).
 
 ```text
 INFO llm_val.valtest_local_drift_stability: Размер OOS (real): 266
@@ -139,22 +141,21 @@ WARNING giga_wraper: GigaEmbed batch failed (attempt 1/3): <текст ошиб�
 | Ключ | Значение |
 |---|---|
 | `test_name` | всегда `local_drift` (имя, по которому `laim-agg` находит тест) |
-| `color` | `red` / `yellow` / `green` / `gray` |
+| `color` | `red` / `amber` / `green` / `gray` |
 | `status` | `not_computable` при `gray`, иначе `computed` |
 | `calculated_traffic_lights` | `{"test_light": <цвет>, "semaphore_title": <текст вердикта>}` |
-| `reason` | всегда `null`: код ключ публикует, но не заполняет |
+| `reason_code`, `reason` | причина серого результата; входные значения сохраняются при `monitoring_metric.status: not_computable` |
 | `metric_value` | среднее `main_metric` по корзине (OOS), не `baseline.value` контракта |
 | `metric_value_estimate` | оценка метрики на мониторинге (OOT) |
 | `drop_estimate` | `abs(metric_value - metric_value_estimate)`, знак не сохраняется |
 | `reliability_mean` | средняя близость соседей по OOT |
 | `share_uncovered` | доля OOT-запросов с близостью ниже `reliability_threshold` |
 
-Словарь цветов ноды — `red`, `yellow`, `green`, `gray`: нода отдаёт именно
-`yellow`, а не `amber`; `laim-agg` нормализует `yellow` в `amber` на входе.
+Внутренний расчёт использует `yellow`, но на выходе нода публикует платформенный
+`amber` одновременно в `color` и `calculated_traffic_lights.test_light`.
 При сером прогоне по малому OOS `metric_value` и `metric_value_estimate` —
 `NaN`, `drop_estimate` — `null`, `share_uncovered` — `1.0`. Заголовок
-светофора в UI ноды читает `$.all_results.issue` — такого ключа нода не
-публикует; текст вердикта лежит в `calculated_traffic_lights.semaphore_title`.
+светофора UI читает из `$.all_results.calculated_traffic_lights.semaphore_title`.
 
 Порт `test_description` — HTML: цель, условия, формула, таблица критериев
 светофора и таблица результатов. Критерии в HTML сформулированы через
@@ -162,17 +163,20 @@ WARNING giga_wraper: GigaEmbed batch failed (attempt 1/3): <текст ошиб�
 
 ## Падение против деградации
 
-Нода не публикует `reason_code`: падение — исключение, которое платформа
-показывает как ошибку ноды.
+Невычислимый входной контракт деградирует в серый результат; ошибки структуры
+вычислимого контракта и данных остаются исключениями платформы.
 
 | Причина | Исключение |
 |---|---|
-| Контракт не `v2`/`v1`, нет `assessment_mode`, `umr_version` не `laim-umr.v2`, `score_column` не `main_metric` | `MonitoringContractError` |
+| Контракт не `v2`/`v1`, в вычислимом контракте нет `assessment_mode`, `umr_version` не `laim-umr.v2`, `score_column` не `main_metric` | `MonitoringContractError` |
 | UMR пуст, не DataFrame, смешан flat и `dialogue`, пустой `query_id`, контекстный режим без `session_id`, turn диалога не тройка | `MonitoringContractError` |
 | В корзине нет `main_metric`; пустой `main_metric` при `missing_policy = fail`; `main_metric` не константен внутри диалога | `MonitoringContractError` |
 | `monitoring_umr` — нечитаемый parquet или несуществующий путь | `MonitoringContractError` |
 | GigaChat недоступен после 3 попыток батча; число векторов не равно числу частей | `RuntimeError` |
 | `ann_config` — не литерал Python; эмбеддинги не двумерны | `ValueError` / `SyntaxError` |
+
+`monitoring_metric.status: not_computable` — серый `all_results` с исходными
+`reason_code`/`reason`; входные датафреймы и вычислительный путь не используются.
 
 Деградация — всегда в серый (`status = not_computable`), без падения:
 
@@ -257,16 +261,17 @@ tests/                               контракт all_assessors, чанки�
 `html_report_helper.py`, `config.py`, `giga_wraper.py`, семь модулей
 `llm_val/` (`ann`, `report_helper`, `sampler`, `scorer`, `utils`,
 `valtest_local_drift_stability`, `valtest_metric`) и два
-`laim_monitoring/` (`__init__`, `core`). Теста соответствия `sourceFiles`
-диску в `tests/` нет; `test_descriptor_defaults_match_runtime_contract`
-закрепляет пороги 0.25 / 0.15 / 0.2 и описание порта `monitoring_umr`.
+`laim_monitoring/` (`__init__`, `core`).
+`test_descriptor_defaults_match_runtime_contract` закрепляет наличие всех
+`sourceFiles`, зависимость `requirements.txt`, пороги 0.25 / 0.15 / 0.2 и
+описание порта `monitoring_umr`.
 
 Зависимости (`requirements.txt`, объявлен в `libraryDependencies`):
 `pandas`, `numpy`, `faiss-cpu`, `gigachat`, `python-dotenv`, `ipython`
-(`IPython.display` в `html_report_helper.py`), `jinja2` (`Styler.to_html`),
-а также `scikit-learn` и `scipy`, которые кодом ноды не импортируются.
+(`IPython.display` в `html_report_helper.py`) и `jinja2` (`Styler.to_html`).
 ZIP ноды — `descriptor.json`, `requirements.txt` и файлы `sourceFiles` из
-ветки `dev`; готовая версия переносится в
+ветки `dev`; готовая версия переносится в агрегирующий репозиторий LAIM
+отдельной синхронизацией.
 Проверка перед сборкой: `python -m pytest -q` и `ruff check .` (CI, Python 3.12).
 
 ## Глоссарий
