@@ -13,6 +13,8 @@ from typing import Any, List, Dict
 import faiss
 import numpy as np
 
+logger = logging.getLogger(__name__)
+
 
 # Минимальное число точек на партицию для адекватного обучения IVF
 MIN_POINTS_PER_PARTITION = 40
@@ -54,7 +56,7 @@ class ANN:
 
         needs_exact = exact or n < MIN_POINTS_PER_PARTITION * self.n_partitions
         if needs_exact and not exact:
-            logging.info(
+            logger.info(
                 f"ANN: выборка {n} слишком мала для IVF с {self.n_partitions} партициями; "
                 "fallback на exact (IndexFlatIP)"
             )

@@ -22,6 +22,8 @@ from laim_monitoring import prepare_drift_frames
 
 from html_report_helper import display_semaphore, show_criteria_semaphore
 
+logger = logging.getLogger(__name__)
+
 
 # =============================================================================
 # ФУНКЦИИ ФОРМИРОВАНИЯ ОТЧЕТОВ
@@ -272,7 +274,7 @@ def main(
 
     ann = ANN()
 
-    logging.info("Тест на локальный дрифт запущен")
+    logger.info("Тест на локальный дрифт запущен")
     res = valtest_local_drift_stability(
         sampler=sampler,
         scorer=scorer,
@@ -292,7 +294,7 @@ def main(
         metric_value_estimate=None,
         reliability_stats=None,
     )
-    logging.info(res)
+    logger.info(res)
 
     semaphore_color = res["report"]["semaphore"]
     semaphore_title = _SEMAPHORE_TITLE[semaphore_color]
