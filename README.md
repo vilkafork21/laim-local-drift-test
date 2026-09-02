@@ -113,23 +113,23 @@ UMR к единицам наблюдения по `assessment_mode`: `qa` — с
 логгер (`logging.info`), поэтому имя логгера — `root`.
 
 ```text
-INFO root: Размер OOS (real): 266
-INFO root: Размер OOT (agent): 412
-INFO root: Тест на локальный дрифт запущен
-INFO root: Используется n_closest=5 для OOS размера 266
-INFO root: Расчёт основной метрики на OOS
-INFO root: Подготовка ANN и эмбеддингов
-INFO root: Начало формирования отчёта
-INFO root: {'report': {'semaphore': 'green', 'result_plots': [], 'result_dataframes': [...]}, 'precomputed': {'metric_value': 0.9736, 'metric_value_estimate': 0.9012, 'reliability': {'mean': 0.7143, 'median': 0.7311, 'q05': 0.4187, 'share_below_threshold': 0.0}}}
+INFO llm_val.valtest_local_drift_stability: Размер OOS (real): 266
+INFO llm_val.sampler: Размер OOT (agent): 412
+INFO llm_val.valtest_local_drift_stability: Тест на локальный дрифт запущен
+INFO llm_val.valtest_local_drift_stability: Используется n_closest=5 для OOS размера 266
+INFO llm_val.valtest_local_drift_stability: Расчёт основной метрики на OOS
+INFO llm_val.valtest_local_drift_stability: Подготовка ANN и эмбеддингов
+INFO llm_val.valtest_local_drift_stability: Начало формирования отчёта
+INFO main: {'report': {'semaphore': 'green', 'result_plots': [], 'result_dataframes': [...]}, 'precomputed': {'metric_value': 0.9736, 'metric_value_estimate': 0.9012, 'reliability': {'mean': 0.7143, 'median': 0.7311, 'q05': 0.4187, 'share_below_threshold': 0.0}}}
 ```
 
 Предупреждения, которые нода пишет при деградации:
 
 ```text
-WARNING root: OOS слишком мал (24 < 30); тест неинформативен
-WARNING root: Некоторые OOT-вопросы пусты; заменяются заглушкой
-WARNING root: GigaEmbed: 3 из 412 текстов длиннее 1000 символов — разбиты на части
-WARNING root: GigaEmbed batch failed (attempt 1/3): <текст ошибки>; повтор через 1.0s
+WARNING llm_val.valtest_local_drift_stability: OOS слишком мал (24 < 30); тест неинформативен
+WARNING llm_val.valtest_local_drift_stability: Некоторые OOT-вопросы пусты; заменяются заглушкой
+WARNING giga_wraper: GigaEmbed: 3 из 412 текстов длиннее 1000 символов — разбиты на части
+WARNING giga_wraper: GigaEmbed batch failed (attempt 1/3): <текст ошибки>; повтор через 1.0s
 ```
 
 ## Форматы выхода и контракты
