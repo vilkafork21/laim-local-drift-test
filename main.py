@@ -149,8 +149,13 @@ def html_report_valtest_local_drift(res, semaphore_title):
     return html_report
 
 
+# Внутренний словарь теста — red/yellow/green/gray; платформа и laim-agg
+# ждут amber: нормализуем на границе вывода, как соседние тесты (LAIM-0004).
+_PLATFORM_COLOR = {"yellow": "amber", "grey": "gray"}
+
+
 def report_valtest_local_drift(res, semaphore_title):
-    semaphore_color = res["report"]["semaphore"]
+    semaphore_color = _PLATFORM_COLOR.get(res["report"]["semaphore"], res["report"]["semaphore"])
     html_report = html_report_valtest_local_drift(res, semaphore_title)
     pre = res.get("precomputed", {})
     metric_value = pre.get("metric_value")
@@ -183,10 +188,13 @@ def report_valtest_local_drift(res, semaphore_title):
 
 # P0-3: ключи унифицированы на "gray"
 _SEMAPHORE_TITLE = {
-    "red": "Результат теста динамики ключевой метрики соответствует красному светофору",
-    "green": "Результат теста динамики ключевой метрики соответствует зелёному светофору",
-    "yellow": "Результат теста динамики ключевой метрики соответствует жёлтому светофору",
-    "gray": "Результат теста динамики ключевой метрики не может быть оценён",
+    "red": "Локальный дрифт запросов: ожидаемое качество на новых запросах "
+           "существенно ниже валидационного — красный светофор",
+    "green": "Локальный дрифт запросов: ожидаемое качество на новых запросах "
+             "соответствует валидационному — зелёный светофор",
+    "yellow": "Локальный дрифт запросов: ожидаемое качество на новых запросах "
+              "заметно ниже валидационного — жёлтый светофор",
+    "gray": "Локальный дрифт запросов не может быть оценён",
 }
 
 
