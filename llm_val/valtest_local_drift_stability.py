@@ -18,6 +18,8 @@ from llm_val.sampler import AutoAsessorSampler as Sampler
 from llm_val.scorer import AutoAsessorScorer as Scorer
 from llm_val.valtest_metric import valtest_metric
 
+logger = logging.getLogger(__name__)
+
 
 # Минимальный размер OOS для информативного теста
 MIN_OOS_SAMPLES = 30
@@ -49,7 +51,7 @@ def report_valtest_local_drift_stability(
 
     Reliability теперь содержит словарь со статистиками распределения (P1-9, P2-6).
     """
-    logging.info("Начало формирования отчёта")
+    logger.info("Начало формирования отчёта")
     metric_value_scalar = metric_value[main_metric]
     reliability_mean = reliability_stats["mean"]
 
@@ -154,7 +156,7 @@ def valtest_local_drift_stability(
     # Размер OOS
     n_oos = len(X_oos)
     if n_oos < MIN_OOS_SAMPLES:
-        logging.warning(f"OOS слишком мал ({n_oos} < {MIN_OOS_SAMPLES}); тест неинформативен")
+        logger.warning(f"OOS слишком мал ({n_oos} < {MIN_OOS_SAMPLES}); тест неинформативен")
         empty_stats = {"mean": np.nan, "median": np.nan, "q05": np.nan, "share_below_threshold": 1.0}
         report = report_valtest_local_drift_stability(
             metric_value or {main_metric: np.nan},
@@ -173,10 +175,10 @@ def valtest_local_drift_stability(
 
     # P2-1: адаптируем n_closest под размер OOS
     n_closest = _adaptive_n_closest(n_oos, n_closest)
-    logging.info(f"Используется n_closest={n_closest} для OOS размера {n_oos}")
+    logger.info(f"Используется n_closest={n_closest} для OOS размера {n_oos}")
 
     if metric_value is None or test_color is None:
-        logging.info("Расчёт основной метрики на OOS")
+        logger.info("Расчёт основной метрики на OOS")
         metric_result = valtest_metric(
             sampler=sampler_copy,
             scorer=scorer,
@@ -189,16 +191,16 @@ def valtest_local_drift_stability(
         metric_value = metric_result["precomputed"]["metric_value"]
 
     if metric_value_estimate is None or reliability_stats is None:
-        logging.info("Подготовка ANN и эмбеддингов")
+        logger.info("Подготовка ANN и эмбеддингов")
 
         # P2-4: фильтруем пустые question
         oos_q = X_oos["question"].astype(str).tolist()
         oot_q = X_oot["question"].astype(str).tolist()
         if any(not q.strip() for q in oos_q):
-            logging.warning("Некоторые OOS-вопросы пусты; заменяются заглушкой")
+            logger.warning("Некоторые OOS-вопросы пусты; заменяются заглушкой")
             oos_q = [q if q.strip() else "<empty>" for q in oos_q]
         if any(not q.strip() for q in oot_q):
-            logging.warning("Некоторые OOT-вопросы пусты; заменяются заглушкой")
+            logger.warning("Некоторые OOT-вопросы пусты; заменяются заглушкой")
             oot_q = [q if q.strip() else "<empty>" for q in oot_q]
 
         oos_embeddings = np.asarray(model.get_embedding(oos_q), dtype=np.float32)
@@ -225,7 +227,7 @@ def valtest_local_drift_stability(
                 y_oos_signed = 2.0 * (y_oos_arr - y_min) / (y_max - y_min) - 1.0
             else:
                 y_oos_signed = np.zeros_like(y_oos_arr)
-            logging.info(f"Не-бинарные метки в диапазоне [{y_min}, {y_max}] — центрирование")
+            logger.info(f"Не-бинарные метки в диапазоне [{y_min}, {y_max}] — центрирование")
 
         test_scores: tp.List[float] = []
         reliability_values: tp.List[float] = []
