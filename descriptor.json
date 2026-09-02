@@ -36,19 +36,9 @@
                   "allowedValues": [
                     {
                       "Среднее по каждой колонке": "single_mean"
-                    },
-                    {
-                      "Среднее по всем колонкам": "multicol_mean"
                     }
                   ],
                   "defaultValue": "single_mean"
-                },
-                {
-                  "parameter": "data_types",
-                  "label": "Типы данных в Sampler",
-                  "uiComponent": "input",
-                  "type": "string",
-                  "defaultValue": "('train', 'test')"
                 },
                 {
                   "parameter": "red_threshold",
@@ -105,7 +95,7 @@
             "datasets": [
               {
                 "value": "$.all_results.color",
-                "title": "$.all_results.issue"
+                "title": "$.all_results.calculated_traffic_lights.semaphore_title"
               }
             ]
           }

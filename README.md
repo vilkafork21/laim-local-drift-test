@@ -54,8 +54,7 @@ laim-kriteria-selector.validated_monitoring_metric ─┘         │
 |---|---|---|
 | `ann_config` | `{'create_index': {'exact': True}, 'search_query': {}}` | Строка-литерал Python; `create_index` принимает `exact`, `n_partitions` (10), `nprobe` (2). `exact: False` включает IVF, но при OOS меньше `40 * n_partitions` строк индекс всё равно точный |
 | `n_closest` | `5` | Верхняя граница числа соседей; фактическое `N = min(n_closest, max(3, min(10, n_oos // 20)))`, при `n_closest <= 0` берётся сама граница |
-| `metric_agg` | `single_mean` | Способ агрегации `target`. Значение `multicol_mean` из списка UI нодой не поддерживается: скорер возвращает ключ `multicol_mean`, а отчёт ищет `target` — прогон падает с `KeyError` |
-| `data_types` | `('train', 'test')` | Имена выборок семплера: `train` — корзина (OOS), `test` — мониторинг (OOT). Другие значения семплер не заполняет; не менять |
+| `metric_agg` | `single_mean` | Способ агрегации `target`; единственное поддерживаемое значение — в UI других нет |
 | `red_threshold` | `0.25` | Абсолютное снижение метрики, с которого светофор красный |
 | `green_threshold` | `0.15` | Абсолютное снижение метрики, до которого светофор зелёный. Код сортирует пару порогов: меньший — граница зелёного, больший — красного |
 | `reliability_threshold` | `0.2` | Порог средней близости соседей; ниже — тест неинформативен |
@@ -173,8 +172,7 @@ WARNING root: GigaEmbed batch failed (attempt 1/3): <текст ошибки>; �
 | В корзине нет `main_metric`; пустой `main_metric` при `missing_policy = fail`; `main_metric` не константен внутри диалога | `MonitoringContractError` |
 | `monitoring_umr` — нечитаемый parquet или несуществующий путь | `MonitoringContractError` |
 | GigaChat недоступен после 3 попыток батча; число векторов не равно числу частей | `RuntimeError` |
-| `ann_config` или `data_types` — не литерал Python; эмбеддинги не двумерны | `ValueError` / `SyntaxError` |
-| `metric_agg = multicol_mean` | `KeyError` |
+| `ann_config` — не литерал Python; эмбеддинги не двумерны | `ValueError` / `SyntaxError` |
 
 Деградация — всегда в серый (`status = not_computable`), без падения:
 

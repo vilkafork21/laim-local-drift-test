@@ -234,3 +234,17 @@ def test_yellow_semaphore_is_published_as_amber_with_local_drift_title():
     assert light["calculated_traffic_lights"]["test_light"] == "amber"
     assert "дрифт" in light["calculated_traffic_lights"]["semaphore_title"].lower()
     assert "динамики ключевой метрики" not in light["calculated_traffic_lights"]["semaphore_title"]
+
+
+def test_gray_verdict_explains_itself():
+    # Серый светофор без причины неотличим от сбоя: причина обязана быть словами.
+    import math
+
+    import main as drift
+
+    res = {"report": {"semaphore": "gray"},
+           "precomputed": {"metric_value": 0.9, "metric_value_estimate": math.nan,
+                           "reliability": {"mean": math.nan, "share_below_threshold": 1.0}}}
+    light = drift.report_valtest_local_drift(res, drift._SEMAPHORE_TITLE["gray"])["all_results"]
+    assert light["status"] == "not_computable"
+    assert "OOS" in light["reason"]
