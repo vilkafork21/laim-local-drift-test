@@ -154,10 +154,27 @@ def html_report_valtest_local_drift(res, semaphore_title):
 _PLATFORM_COLOR = {"yellow": "amber", "grey": "gray"}
 
 
-def report_valtest_local_drift(res, semaphore_title):
+def _gray_reason(pre: dict, reliability_threshold: float, is_info: bool) -> str | None:
+    """Причина серого светофора словами — ту же логику применяет отчёт."""
+    reliability = pre.get("reliability", {})
+    estimate = pre.get("metric_value_estimate")
+    if is_info:
+        return "информационный режим (is_info)"
+    if estimate is None or pd.isna(estimate):
+        return f"оценка недоступна: OOS меньше {MIN_OOS_SAMPLES} единиц или нет соседей"
+    if reliability.get("share_below_threshold", 0.0) > 0.3:
+        return "доля запросов без надёжных соседей выше 0.3"
+    if (reliability.get("mean") or 0.0) < reliability_threshold:
+        return f"средняя надёжность оценки ниже порога {reliability_threshold}"
+    return None
+
+
+def report_valtest_local_drift(res, semaphore_title, reliability_threshold=0.2, is_info=False):
     semaphore_color = _PLATFORM_COLOR.get(res["report"]["semaphore"], res["report"]["semaphore"])
     html_report = html_report_valtest_local_drift(res, semaphore_title)
-    pre = res.get("precomputed", {})
+    pre = dict(res.get("precomputed", {}))
+    if semaphore_color == "gray" and not pre.get("reason"):
+        pre["reason"] = _gray_reason(pre, reliability_threshold, is_info)
     metric_value = pre.get("metric_value")
     metric_estimate = pre.get("metric_value_estimate")
     reliability = pre.get("reliability", {})
@@ -280,7 +297,8 @@ def main(
     semaphore_color = res["report"]["semaphore"]
     semaphore_title = _SEMAPHORE_TITLE[semaphore_color]
 
-    report_result = report_valtest_local_drift(res, semaphore_title)
+    report_result = report_valtest_local_drift(
+        res, semaphore_title, reliability_threshold=reliability_threshold, is_info=is_info)
     report_result["all_results"]["test_name"] = "local_drift"
 
     return {
