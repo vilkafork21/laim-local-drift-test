@@ -267,7 +267,6 @@ tests/                               контракт all_assessors, чанки�
 а также `scikit-learn` и `scipy`, которые кодом ноды не импортируются.
 ZIP ноды — `descriptor.json`, `requirements.txt` и файлы `sourceFiles` из
 ветки `dev`; готовая версия переносится в
-`laim/monitoring/laim-local-drift-test` со строкой в `MANIFEST.md`.
 Проверка перед сборкой: `python -m pytest -q` и `ruff check .` (CI, Python 3.12).
 
 ## Глоссарий
