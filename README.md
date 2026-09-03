@@ -153,8 +153,9 @@ WARNING giga_wraper: GigaEmbed batch failed (attempt 1/3): <текст ошиб�
 
 Внутренний расчёт использует `yellow`, но на выходе нода публикует платформенный
 `amber` одновременно в `color` и `calculated_traffic_lights.test_light`.
-При сером прогоне по малому OOS `metric_value` и `metric_value_estimate` —
-`NaN`, `drop_estimate` — `null`, `share_uncovered` — `1.0`. Заголовок
+При сером прогоне по малому OOS `metric_value`, `metric_value_estimate`,
+`reliability_mean` и `drop_estimate` — `null` (NaN расчёта не публикуется:
+это не JSON), `share_uncovered` — `1.0`. Заголовок
 светофора UI читает из `$.all_results.calculated_traffic_lights.semaphore_title`.
 
 Порт `test_description` — HTML: цель, условия, формула, таблица критериев
@@ -182,7 +183,7 @@ WARNING giga_wraper: GigaEmbed batch failed (attempt 1/3): <текст ошиб�
 
 | Событие | Реакция |
 |---|---|
-| OOS меньше 30 строк | `gray`, WARNING; GigaChat не вызывается; числа `NaN` |
+| OOS меньше 30 строк | `gray`, WARNING; GigaChat не вызывается; числа `null` |
 | `reliability.mean < reliability_threshold` | `gray`; числа публикуются |
 | Доля запросов с низкой близостью выше 0.3 | `gray`; числа публикуются |
 | `is_info = true` | `gray` |
@@ -217,7 +218,7 @@ WARNING giga_wraper: GigaEmbed batch failed (attempt 1/3): <текст ошиб�
 `result_dataframes`. Машинная запись прогона — сам `all_results`: триаж на
 сотне прогонов делается по `status`, `color`, `drop_estimate`,
 `reliability_mean`, `share_uncovered`. Серый с `share_uncovered = 1.0` и
-`NaN` — малый OOS; серый с числами — низкая близость соседей.
+`null` — малый OOS; серый с числами — низкая близость соседей.
 
 ## Карта кода
 
@@ -239,7 +240,7 @@ tests/                               контракт all_assessors, чанки�
 
 ## Что делать, если
 
-- **Серый, `share_uncovered = 1.0`, значения `NaN`** — корзина меньше 30
+- **Серый, `share_uncovered = 1.0`, значения `null`** — корзина меньше 30
   единиц наблюдения (в режиме `dialogue` единица — сессия, а не реплика).
   Проверьте `assessment_mode` контракта и размер корзины.
 - **Серый с числами** — мониторинговые запросы далеки от корзины
