@@ -171,14 +171,19 @@ def _gray_reason(pre: dict, reliability_threshold: float, is_info: bool) -> str 
     return None
 
 
+def _finite(value):
+    """NaN расчёта (малый OOS) на порту становится null: NaN — не JSON."""
+    return None if value is None or pd.isna(value) else value
+
+
 def report_valtest_local_drift(res, semaphore_title, reliability_threshold=0.2, is_info=False):
     semaphore_color = _PLATFORM_COLOR.get(res["report"]["semaphore"], res["report"]["semaphore"])
     html_report = html_report_valtest_local_drift(res, semaphore_title)
     pre = dict(res.get("precomputed", {}))
     if semaphore_color == "gray" and not pre.get("reason"):
         pre["reason"] = _gray_reason(pre, reliability_threshold, is_info)
-    metric_value = pre.get("metric_value")
-    metric_estimate = pre.get("metric_value_estimate")
+    metric_value = _finite(pre.get("metric_value"))
+    metric_estimate = _finite(pre.get("metric_value_estimate"))
     reliability = pre.get("reliability", {})
     return {
         "all_results": {
@@ -193,12 +198,10 @@ def report_valtest_local_drift(res, semaphore_title, reliability_threshold=0.2, 
             "metric_value_estimate": metric_estimate,
             "drop_estimate": (
                 abs(metric_value - metric_estimate)
-                if metric_value is not None
-                and metric_estimate is not None
-                and not pd.isna(metric_estimate)
+                if metric_value is not None and metric_estimate is not None
                 else None
             ),
-            "reliability_mean": reliability.get("mean"),
+            "reliability_mean": _finite(reliability.get("mean")),
             "share_uncovered": reliability.get("share_below_threshold"),
         },
         "hidden_port": html_report,
