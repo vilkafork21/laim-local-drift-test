@@ -202,10 +202,40 @@ def test_main_accepts_qa_and_dialogue(mode, monkeypatch):
     assert result["all_results"]["metric_value_estimate"] == 0.5
 
 
-def test_descriptor_defaults_match_runtime_contract():
-    descriptor = json.loads(
-        (Path(__file__).resolve().parents[1] / "descriptor.json").read_text()
+def test_not_computable_metric_skips_drift_computation(monkeypatch):
+    import main as drift
+
+    def forbidden(*_args, **_kwargs):
+        raise AssertionError("Вычислительный путь не должен запускаться")
+
+    monkeypatch.setattr(drift, "prepare_drift_frames", forbidden)
+    monkeypatch.setattr(drift, "Config", forbidden)
+    monkeypatch.setattr(drift, "GigaEmbed", forbidden)
+    monkeypatch.setattr(drift, "valtest_local_drift_stability", forbidden)
+
+    result = drift.main(
+        object(),
+        object(),
+        {
+            "contract_version": "laim-monitoring-metric.v2",
+            "umr_version": "laim-umr.v2",
+            "status": "not_computable",
+            "reason_code": "ambiguous_baseline",
+            "reason": "baseline нельзя определить однозначно",
+        },
     )
+
+    light = result["all_results"]
+    assert light["color"] == "gray"
+    assert light["status"] == "not_computable"
+    assert light["reason_code"] == "ambiguous_baseline"
+    assert light["reason"] == "baseline нельзя определить однозначно"
+    assert light["test_name"] == "local_drift"
+
+
+def test_descriptor_defaults_match_runtime_contract():
+    root = Path(__file__).resolve().parents[1]
+    descriptor = json.loads((root / "descriptor.json").read_text())
     components = descriptor["ui"]["settings"][0]["components"][0]["config"][
         "components"
     ]
@@ -218,6 +248,9 @@ def test_descriptor_defaults_match_runtime_contract():
     )
     assert "monitoring_umr" in monitoring_port["description"]
     assert "parquet_test_dataset" not in monitoring_port["description"]
+    run_config = descriptor["script"]["runConfiguration"]
+    assert run_config["libraryDependencies"] == ["requirements.txt"]
+    assert all((root / path).is_file() for path in run_config["sourceFiles"])
 
 
 def test_yellow_semaphore_is_published_as_amber_with_local_drift_title():
