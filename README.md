@@ -100,7 +100,9 @@ laim-kriteria-selector.validated_monitoring_metric ─┘         │
 `{-1, +1}`, иные — центрируются `2 * (y - min) / (max - min) - 1`. Для
 каждого OOT-запроса `score = 0.5 + sum(sim_i * target_i) / (2 * N)`,
 обрезанный в `[0, 1]`; `reliability` запроса — среднее `sim_i`. Оценка
-метрики — среднее `score` по OOT; надёжность — `mean`, `median`, `q05` и
+метрики — среднее `score` по OOT, для непрерывных меток возвращённое в их
+шкалу (`min + score * (max - min)`), чтобы снижение сравнивало одну шкалу;
+надёжность — `mean`, `median`, `q05` и
 `share_below_threshold` (доля запросов с `reliability < reliability_threshold`).
 
 **7. Отчёт.** Снижение `drop = metric_value - estimate` (при

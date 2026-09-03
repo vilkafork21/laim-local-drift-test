@@ -218,11 +218,13 @@ def valtest_local_drift_stability(
         # P2-2: для бинарных {0,1} меток → {-1,+1}; для других → центрируем
         y_oos_arr = np.asarray(y_oos.values, dtype=float).ravel()
         unique_vals = np.unique(y_oos_arr[~np.isnan(y_oos_arr)])
+        label_span = None
         if set(unique_vals.tolist()).issubset({0.0, 1.0}):
             y_oos_signed = np.where(y_oos_arr == 0, -1.0, 1.0)
         else:
             # Центрирование: y' = 2*(y - min)/(max - min) - 1
             y_min, y_max = float(np.nanmin(y_oos_arr)), float(np.nanmax(y_oos_arr))
+            label_span = (y_min, y_max)
             if y_max > y_min:
                 y_oos_signed = 2.0 * (y_oos_arr - y_min) / (y_max - y_min) - 1.0
             else:
@@ -252,6 +254,12 @@ def valtest_local_drift_stability(
         reliability_arr = np.asarray(reliability_values, dtype=float)
 
         metric_value_estimate = float(np.mean(test_scores_arr))
+        if label_span is not None:
+            # score лежит в [0, 1] относительно центрированных меток; metric_value
+            # считается в шкале меток корзины — возвращаем оценку в ту же шкалу,
+            # иначе снижение сравнивает разные шкалы.
+            y_min, y_max = label_span
+            metric_value_estimate = y_min + metric_value_estimate * (y_max - y_min)
         # P1-9: статистики распределения reliability
         reliability_stats = {
             "mean": float(np.mean(reliability_arr)),

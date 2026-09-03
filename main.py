@@ -140,7 +140,7 @@ def html_report_valtest_local_drift(res, semaphore_title):
     где target<sub>i</sub> = {{-1, +1}} для бинарных меток или 2·(y − y<sub>min</sub>)/(y<sub>max</sub> − y<sub>min</sub>) − 1 для непрерывных.
 </p>
 <ol style="text-align: left; margin-left: 20px; padding-left: 20px; counter-reset: list 2;">
-    <li>Финальное качество — среднее score<sub>j</sub> по OOT, ограниченное [0, 1].</li>
+    <li>Финальное качество — среднее score<sub>j</sub> по OOT, ограниченное [0, 1]; для непрерывных меток — возвращённое в их шкалу: y<sub>min</sub> + score·(y<sub>max</sub> − y<sub>min</sub>).</li>
     <li>Надёжность: среднее, медиана, 5-й перцентиль similarity top-N и доля «непокрытых» запросов.</li>
 </ol>
 <p style="text-align: left;"><b>Критерии выставления светофора</b></p>
