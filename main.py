@@ -158,16 +158,13 @@ _PLATFORM_COLOR = {"yellow": "amber", "grey": "gray"}
 
 def _gray_reason(pre: dict, reliability_threshold: float, is_info: bool) -> str | None:
     """Причина серого светофора словами — ту же логику применяет отчёт."""
-    reliability = pre.get("reliability", {})
     estimate = pre.get("metric_value_estimate")
     if is_info:
         return "информационный режим (is_info)"
+    if pre.get("reason"):
+        return pre["reason"]
     if estimate is None or pd.isna(estimate):
         return f"оценка недоступна: OOS меньше {MIN_OOS_SAMPLES} единиц или нет соседей"
-    if reliability.get("share_below_threshold", 0.0) > 0.3:
-        return "доля запросов без надёжных соседей выше 0.3"
-    if (reliability.get("mean") or 0.0) < reliability_threshold:
-        return f"средняя надёжность оценки ниже порога {reliability_threshold}"
     return None
 
 
@@ -203,6 +200,12 @@ def report_valtest_local_drift(res, semaphore_title, reliability_threshold=0.2, 
             ),
             "reliability_mean": _finite(reliability.get("mean")),
             "share_uncovered": reliability.get("share_below_threshold"),
+            "reason_code": pre.get("reason_code"),
+            "n_oos": pre.get("n_oos"),
+            "n_oot": pre.get("n_oot"),
+            "n_closest": pre.get("n_closest"),
+            # Карточка 6.3.7: тест покрытия светофор итерации не формирует.
+            "informative": True,
         },
         "hidden_port": html_report,
     }
@@ -210,13 +213,13 @@ def report_valtest_local_drift(res, semaphore_title, reliability_threshold=0.2, 
 
 # P0-3: ключи унифицированы на "gray"
 _SEMAPHORE_TITLE = {
-    "red": "Локальный дрифт запросов: ожидаемое качество на новых запросах "
-           "существенно ниже валидационного — красный светофор",
-    "green": "Локальный дрифт запросов: ожидаемое качество на новых запросах "
-             "соответствует валидационному — зелёный светофор",
-    "yellow": "Локальный дрифт запросов: ожидаемое качество на новых запросах "
-              "заметно ниже валидационного — жёлтый светофор",
-    "gray": "Локальный дрифт запросов не может быть оценён",
+    "red": "Покрытие потока эталоном: более половины запросов мониторинга не имеют "
+           "близких аналогов в эталоне — красный технический сигнал",
+    "yellow": "Покрытие потока эталоном: заметная доля запросов мониторинга не покрыта "
+              "эталоном — жёлтый технический сигнал",
+    "green": "Покрытие потока эталоном: запросы мониторинга представлены в эталоне — "
+             "зелёный технический сигнал",
+    "gray": "Покрытие потока эталоном не может быть оценено",
 }
 
 
@@ -232,9 +235,11 @@ def main(
     n_closest: int = 5,
     metric_agg: str = "single_mean",
     data_types: tuple = ("train", "test"),
-    green_threshold: float = 0.15,
-    red_threshold: float = 0.25,
     reliability_threshold: float = 0.2,
+    uncovered_amber_share: float = 0.3,
+    uncovered_red_share: float = 0.5,
+    min_reference_units: int = 30,
+    min_monitoring_units: int = 30,
     greater_is_better: bool = True,
     is_info: bool = False,
 ):
@@ -281,12 +286,6 @@ def main(
     elif isinstance(ann_config, str):
         ann_config = literal_eval(ann_config)
 
-    # P0-5: пороги в правильном порядке
-    semaphore_threshold = (
-        min(red_threshold, green_threshold),
-        max(red_threshold, green_threshold),
-    )
-
     reference_frame, monitoring_frame = prepare_drift_frames(
         reference_umr, monitoring_umr, monitoring_metric
     )
@@ -312,11 +311,13 @@ def main(
         metric_binarizer=None,
         metric_agg=metric_agg,
         data_types=data_types,
-        semaphore_threshold=semaphore_threshold,
         reliability_threshold=reliability_threshold,
+        uncovered_amber=uncovered_amber_share,
+        uncovered_red=uncovered_red_share,
+        min_oos_samples=min_reference_units,
+        min_oot_samples=min_monitoring_units,
         greater_is_better=greater_is_better,
         is_info=is_info,
-        test_color=None,
         metric_value_estimate=None,
         reliability_stats=None,
     )
@@ -327,7 +328,16 @@ def main(
 
     report_result = report_valtest_local_drift(
         res, semaphore_title, reliability_threshold=reliability_threshold, is_info=is_info)
-    report_result["all_results"]["test_name"] = "local_drift"
+    report_result["all_results"].update(
+        test_name="local_drift",
+        thresholds={
+            "uncovered_amber_share": uncovered_amber_share,
+            "uncovered_red_share": uncovered_red_share,
+            "reliability_threshold": reliability_threshold,
+            "min_reference_units": min_reference_units,
+            "min_monitoring_units": min_monitoring_units,
+        },
+    )
 
     return {
         "all_results": report_result["all_results"],

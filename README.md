@@ -9,11 +9,15 @@
 
 ## Зачем нода нужна
 
-На мониторинге нет разметки: неизвестно, хорошо ли агент ответил на запрос из
-трафика. Нода закрывает пробел без асессора: для каждого мониторингового
-запроса находит ближайшие по смыслу запросы корзины с известной оценкой и
-переносит их оценку с весом, равным близости. Если близких эталонов нет
-(запросы «уехали» от корзины), нода отвечает «серый», а не выдаёт число.
+Тест покрытия текущего потока эталоном (карточка 6.3.7 методики этапа 4):
+для каждого мониторингового запроса нода находит ближайшие по смыслу запросы
+эталонной корзины и считает, какая доля потока не имеет близких аналогов.
+Такие запросы — кандидаты на внеочередную разметку и пополнение корзины.
+По методике тест **не формирует светофор итерации**: его цвет — технический
+сигнал тяжести непокрытой доли, агрегатор учитывает результат как
+информативный. Оценка метрики по меткам соседей публикуется как информация и
+на цвет не влияет (перенос оценок между близкими запросами для этого класса
+решений не подтверждён).
 
 Ключевые решения: LLM используется **только как эмбеддер** (GigaChat
 Embeddings), арифметика детерминирована; форма данных (QA, реплика с историей,
@@ -55,9 +59,11 @@ laim-kriteria-selector.validated_monitoring_metric ─┘         │
 | `ann_config` | `{'create_index': {'exact': True}, 'search_query': {}}` | Строка-литерал Python; `create_index` принимает `exact`, `n_partitions` (10), `nprobe` (2). `exact: False` включает IVF, но при OOS меньше `40 * n_partitions` строк индекс всё равно точный |
 | `n_closest` | `5` | Верхняя граница числа соседей; фактическое `N = min(n_closest, max(3, min(10, n_oos // 20)))`, при `n_closest <= 0` берётся сама граница |
 | `metric_agg` | `single_mean` | Способ агрегации `target`; единственное поддерживаемое значение — в UI других нет |
-| `red_threshold` | `0.25` | Абсолютное снижение метрики, с которого светофор красный |
-| `green_threshold` | `0.15` | Абсолютное снижение метрики, до которого светофор зелёный. Код сортирует пару порогов: меньший — граница зелёного, больший — красного |
-| `reliability_threshold` | `0.2` | Порог средней близости соседей; ниже — тест неинформативен |
+| `reliability_threshold` | `0.2` | Порог близости: запрос считается непокрытым, если средняя близость его соседей ниже; средняя близость по всем запросам ниже порога — жёлтый |
+| `uncovered_amber_share` | `0.3` | Доля непокрытых запросов, с которой технический сигнал жёлтый |
+| `uncovered_red_share` | `0.5` | Доля непокрытых запросов, с которой технический сигнал красный |
+| `min_reference_units` | `30` | Минимум единиц эталона (OOS); меньше — `not_computable`, `insufficient_reference_units` |
+| `min_monitoring_units` | `30` | Минимум единиц мониторинга (OOT); меньше — `not_computable`, `insufficient_monitoring_units` |
 | `greater_is_better` | `true` | Направление метрики: при `false` красным считается рост оценки |
 | `is_info` | `false` | Принудительно серый светофор (информативный тест) |
 
@@ -66,11 +72,11 @@ laim-kriteria-selector.validated_monitoring_metric ─┘         │
 ```text
 1. Контракт      validate_monitoring_metric; not_computable -> серый без чтения UMR
 2. Семплер       корзина -> OOS (train), мониторинг -> OOT (test); target -> float
-3. Гейт размера  OOS < 30 строк -> серый без обращения к GigaChat
-4. Метрика OOS   среднее main_metric корзины и его светофор по порогам (0.4, 0.6)
+3. Минимумы      OOS < min_reference_units или OOT < min_monitoring_units -> серый с reason_code без обращения к GigaChat
+4. Метрика OOS   среднее main_metric корзины (информация для отчёта)
 5. Эмбеддинги    GigaChat Embeddings для вопросов OOS и OOT, FAISS-индекс по OOS
-6. Оценка        для каждого OOT-запроса top-N соседей, score и reliability
-7. Отчёт         цвет = худший из светофора OOS и светофора по снижению; HTML
+6. Покрытие      для каждого OOT-запроса top-N соседей, близость и доля непокрытых; оценка по соседям как информация
+7. Отчёт         цвет = технический сигнал по доле непокрытых (uncovered_amber_share / uncovered_red_share) и средней близости; informative=true; HTML
 ```
 
 **1. Контракт.** `main` сначала валидирует `monitoring_metric`. При входном
@@ -83,14 +89,15 @@ laim-kriteria-selector.validated_monitoring_metric ─┘         │
 реплик), пустой `answer` и `target` = `main_metric`; в корзине `target`
 обязателен, строки с пустым `target` при `missing_policy != fail` отбрасываются.
 
-**2–3. Семплер и гейт.** `AutoAsessorSampler` кладёт корзину в `train`,
-мониторинг в `test`. Меньше 30 строк OOS (`MIN_OOS_SAMPLES`) — серый до
-обращения к эмбеддеру.
+**2–3. Семплер и минимумы.** `AutoAsessorSampler` кладёт корзину в `train`,
+мониторинг в `test`. Меньше `min_reference_units` единиц OOS или
+`min_monitoring_units` единиц OOT — серый с `reason_code` до обращения к
+эмбеддеру: одна единица не должна выставлять цвет.
 
-**4. Метрика OOS.** `valtest_metric` считает среднее `target` по корзине и
-ставит ему светофор `tricky_semaphore` с зашитыми порогами `(0.4, 0.6)`:
-ниже 0.4 — красный, от 0.4 до 0.6 — жёлтый, от 0.6 — зелёный. Пороги в
-настройки не вынесены и участвуют в итоговом цвете (шаг 7).
+**4. Метрика OOS.** `valtest_metric` считает среднее `target` по корзине —
+информация для отчёта. Светофор уровня метрики корзины, который этот
+модуль умеет ставить (пороги 0.4/0.6), в результат не входит: уровень
+качества корзины — предмет валидации, а не теста покрытия.
 
 **5. Эмбеддинги и индекс.** Пустые вопросы — заглушка `<empty>`, `NaN` в
 векторах — нули. Векторы нормализуются L2, индекс `IndexFlatIP` (косинусная
@@ -143,13 +150,16 @@ WARNING giga_wraper: GigaEmbed batch failed (attempt 1/3): <текст ошиб�
 | Ключ | Значение |
 |---|---|
 | `test_name` | всегда `local_drift` (имя, по которому `laim-agg` находит тест) |
-| `color` | `red` / `amber` / `green` / `gray` |
+| `color` | `red` / `amber` / `green` / `gray` — технический сигнал по доле непокрытых запросов |
 | `status` | `not_computable` при `gray`, иначе `computed` |
+| `informative` | всегда `true`: по карточке 6.3.7 тест светофор итерации не формирует |
+| `n_oos`, `n_oot`, `n_closest` | единиц эталона, единиц мониторинга, фактическое число соседей |
+| `thresholds` | эффективные настройки: доли непокрытых, порог близости, минимумы объёма |
 | `calculated_traffic_lights` | `{"test_light": <цвет>, "semaphore_title": <текст вердикта>}` |
 | `reason_code`, `reason` | причина серого результата; входные значения сохраняются при `monitoring_metric.status: not_computable` |
 | `metric_value` | среднее `main_metric` по корзине (OOS), не `baseline.value` контракта |
-| `metric_value_estimate` | оценка метрики на мониторинге (OOT) |
-| `drop_estimate` | `abs(metric_value - metric_value_estimate)`, знак не сохраняется |
+| `metric_value_estimate` | оценка метрики на мониторинге (OOT) по меткам соседей — информация, на цвет не влияет |
+| `drop_estimate` | `abs(metric_value - metric_value_estimate)`, знак не сохраняется — информация |
 | `reliability_mean` | средняя близость соседей по OOT |
 | `share_uncovered` | доля OOT-запросов с близостью ниже `reliability_threshold` |
 
@@ -161,8 +171,7 @@ WARNING giga_wraper: GigaEmbed batch failed (attempt 1/3): <текст ошиб�
 светофора UI читает из `$.all_results.calculated_traffic_lights.semaphore_title`.
 
 Порт `test_description` — HTML: цель, условия, формула, таблица критериев
-светофора и таблица результатов. Критерии в HTML сформулированы через
-«светофор OOT»; в коде это светофор среднего `main_metric` корзины (OOS).
+и таблица результатов.
 
 ## Падение против деградации
 
@@ -185,9 +194,9 @@ WARNING giga_wraper: GigaEmbed batch failed (attempt 1/3): <текст ошиб�
 
 | Событие | Реакция |
 |---|---|
-| OOS меньше 30 строк | `gray`, WARNING; GigaChat не вызывается; числа `null` |
-| `reliability.mean < reliability_threshold` | `gray`; числа публикуются |
-| Доля запросов с низкой близостью выше 0.3 | `gray`; числа публикуются |
+| OOS меньше `min_reference_units` или OOT меньше `min_monitoring_units` | `gray`, `reason_code` `insufficient_reference_units` / `insufficient_monitoring_units`, WARNING; GigaChat не вызывается; числа `null` |
+| Доля непокрытых запросов выше `uncovered_red_share` | `red` (технический сигнал) |
+| Доля непокрытых выше `uncovered_amber_share` или средняя близость ниже `reliability_threshold` | `amber` (технический сигнал) |
 | `is_info = true` | `gray` |
 | Пустой `main_metric` в корзине при `missing_policy` `exclude_unit`/`exclude_value`/`zero` | строка отброшена из OOS без записи в лог |
 | Пустой вопрос в OOS/OOT; `NaN` в векторе эмбеддинга | заглушка `<empty>` с WARNING; нули |
@@ -229,8 +238,8 @@ main.py                              порты платформы, настро
 config.py                            Config: контур sigma/sds из переменных окружения
 giga_wraper.py                       GigaEmbed: батчи, чанкинг, ретраи, mean pooling
 html_report_helper.py                светофоры и таблица критериев для HTML (IPython)
-llm_val/valtest_local_drift_stability.py  тест: гейт OOS, адаптивный N, score, reliability, цвет
-llm_val/valtest_metric.py            метрика OOS и её светофор (пороги 0.4/0.6)
+llm_val/valtest_local_drift_stability.py  тест: минимумы OOS/OOT, адаптивный N, покрытие, оценка по соседям, технический цвет
+llm_val/valtest_metric.py            среднее main_metric корзины (светофор модуля не используется)
 llm_val/report_helper.py             semaphore_by_threshold, worst_semaphore, tricky_semaphore
 llm_val/ann.py                       ANN: FAISS IndexFlatIP / IndexIVFFlat, fallback на exact
 llm_val/sampler.py                   AutoAsessorSampler: OOS = train, OOT = test

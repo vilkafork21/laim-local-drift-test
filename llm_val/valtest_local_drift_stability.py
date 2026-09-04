@@ -13,7 +13,6 @@ from copy import deepcopy
 
 import numpy as np
 import pandas as pd
-from llm_val.report_helper import semaphore_by_threshold, worst_semaphore
 from llm_val.sampler import AutoAsessorSampler as Sampler
 from llm_val.scorer import AutoAsessorScorer as Scorer
 from llm_val.valtest_metric import valtest_metric
@@ -39,42 +38,29 @@ def report_valtest_local_drift_stability(
     metric_value_estimate: float,
     reliability_stats: tp.Dict[str, float],
     main_metric: str,
-    test_color: str,
     data_types: tp.Tuple[str, str] = ("train", "test"),
-    semaphore_threshold: tp.Tuple[float, float] = (0.15, 0.25),
     reliability_threshold: float = 0.2,
-    greater_is_better: bool = True,
+    uncovered_amber: float = 0.3,
+    uncovered_red: float = 0.5,
     is_info: bool = False,
 ) -> tp.Dict[str, tp.Any]:
-    """
-    Создание отчёта по результатам теста.
+    """Отчёт теста покрытия потока эталоном (карточка 6.3.7).
 
-    Reliability теперь содержит словарь со статистиками распределения (P1-9, P2-6).
-    """
+    Цвет отражает тяжесть непокрытой доли потока; оценка метрики по соседям
+    публикуется как информация и на цвет не влияет."""
     logger.info("Начало формирования отчёта")
     metric_value_scalar = metric_value[main_metric]
     reliability_mean = reliability_stats["mean"]
+    share_uncovered = reliability_stats.get("share_below_threshold", 0.0)
 
-    # Условия серого светофора: явный is_info ИЛИ низкая средняя надёжность
-    # ИЛИ слишком много «непокрытых» запросов (P1-9)
-    is_gray = (
-        is_info
-        or reliability_mean < reliability_threshold
-        or reliability_stats.get("share_below_threshold", 0.0) > 0.3
-        or np.isnan(metric_value_estimate)
-    )
-
-    abs_diff = metric_value_estimate - metric_value_scalar
-    if greater_is_better:
-        abs_diff = -abs_diff
-
-    if is_gray:
+    if is_info or np.isnan(metric_value_estimate) or np.isnan(reliability_mean):
         result_color = "gray"
+    elif share_uncovered > uncovered_red:
+        result_color = "red"
+    elif share_uncovered > uncovered_amber or reliability_mean < reliability_threshold:
+        result_color = "yellow"
     else:
-        color_by_metric = semaphore_by_threshold(
-            abs_diff, semaphore_threshold, greater_is_better=False
-        )
-        result_color = worst_semaphore([test_color, color_by_metric])
+        result_color = "green"
 
     df = pd.DataFrame(
         {
@@ -114,12 +100,14 @@ def valtest_local_drift_stability(
     metric_binarizer: tp.Optional[tp.Callable] = None,
     metric_agg: str = "single_mean",
     data_types: tp.Tuple[str, str] = ("train", "test"),
-    semaphore_threshold: tp.Tuple[float, float] = (0.15, 0.25),
     reliability_threshold: float = 0.2,
+    uncovered_amber: float = 0.3,
+    uncovered_red: float = 0.5,
+    min_oos_samples: int = MIN_OOS_SAMPLES,
+    min_oot_samples: int = 30,
     greater_is_better: bool = True,
     is_info: bool = False,
     metric_value: tp.Optional[tp.Dict[str, float]] = None,
-    test_color: tp.Optional[str] = None,
     metric_value_estimate: tp.Optional[float] = None,
     reliability_stats: tp.Optional[tp.Dict[str, float]] = None,
     **kwargs,
@@ -153,16 +141,22 @@ def valtest_local_drift_stability(
         setattr(sampler_copy, data_types[1],
                 {"X": oot["X"], "y": y_oot_binarized})
 
-    # Размер OOS
+    # Минимумы объёма с обеих сторон: без них цвет выставлялся по одной единице.
     n_oos = len(X_oos)
-    if n_oos < MIN_OOS_SAMPLES:
-        logger.warning(f"OOS слишком мал ({n_oos} < {MIN_OOS_SAMPLES}); тест неинформативен")
+    n_oot = len(X_oot)
+    if n_oos < min_oos_samples or n_oot < min_oot_samples:
+        if n_oos < min_oos_samples:
+            reason_code = "insufficient_reference_units"
+            reason = f"OOS {n_oos} единиц меньше минимума {min_oos_samples}"
+        else:
+            reason_code = "insufficient_monitoring_units"
+            reason = f"OOT {n_oot} единиц меньше минимума {min_oot_samples}"
+        logger.warning("Тест покрытия не оценивается: %s", reason)
         empty_stats = {"mean": np.nan, "median": np.nan, "q05": np.nan, "share_below_threshold": 1.0}
         report = report_valtest_local_drift_stability(
             metric_value or {main_metric: np.nan},
-            np.nan, empty_stats, main_metric,
-            test_color or "gray", data_types, semaphore_threshold,
-            reliability_threshold, greater_is_better, is_info=True,
+            np.nan, empty_stats, main_metric, data_types,
+            reliability_threshold, uncovered_amber, uncovered_red, is_info=True,
         )
         return {
             "report": report,
@@ -170,6 +164,11 @@ def valtest_local_drift_stability(
                 "metric_value": (metric_value or {main_metric: np.nan})[main_metric],
                 "metric_value_estimate": np.nan,
                 "reliability": empty_stats,
+                "reason_code": reason_code,
+                "reason": reason,
+                "n_oos": int(n_oos),
+                "n_oot": int(n_oot),
+                "n_closest": None,
             },
         }
 
@@ -177,7 +176,7 @@ def valtest_local_drift_stability(
     n_closest = _adaptive_n_closest(n_oos, n_closest)
     logger.info(f"Используется n_closest={n_closest} для OOS размера {n_oos}")
 
-    if metric_value is None or test_color is None:
+    if metric_value is None:
         logger.info("Расчёт основной метрики на OOS")
         metric_result = valtest_metric(
             sampler=sampler_copy,
@@ -187,7 +186,8 @@ def valtest_local_drift_stability(
             metric_agg=metric_agg,
             greater_is_better=greater_is_better,
         )
-        test_color = metric_result["report"]["semaphore"]
+        # Светофор уровня метрики из valtest_metric не используется: уровень
+        # качества корзины — предмет валидации, а не теста покрытия.
         metric_value = metric_result["precomputed"]["metric_value"]
 
     if metric_value_estimate is None or reliability_stats is None:
@@ -272,17 +272,19 @@ def valtest_local_drift_stability(
         "metric_value": metric_value[main_metric],
         "metric_value_estimate": metric_value_estimate,
         "reliability": reliability_stats,
+        "n_oos": int(n_oos),
+        "n_oot": int(n_oot),
+        "n_closest": int(n_closest),
     }
     report = report_valtest_local_drift_stability(
         metric_value=metric_value,
         metric_value_estimate=metric_value_estimate,
         reliability_stats=reliability_stats,
         main_metric=main_metric,
-        test_color=test_color,
         data_types=data_types,
-        semaphore_threshold=semaphore_threshold,
         reliability_threshold=reliability_threshold,
-        greater_is_better=greater_is_better,
+        uncovered_amber=uncovered_amber,
+        uncovered_red=uncovered_red,
         is_info=is_info,
     )
     return {"report": report, "precomputed": precomputed}
