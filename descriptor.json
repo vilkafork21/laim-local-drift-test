@@ -41,25 +41,39 @@
                   "defaultValue": "single_mean"
                 },
                 {
-                  "parameter": "red_threshold",
-                  "label": "Порог красного светофора по метрике",
-                  "uiComponent": "input",
-                  "type": "float",
-                  "defaultValue": 0.25
-                },
-                {
-                  "parameter": "green_threshold",
-                  "label": "Порог зеленого светофора по метрике",
-                  "uiComponent": "input",
-                  "type": "float",
-                  "defaultValue": 0.15
-                },
-                {
                   "parameter": "reliability_threshold",
-                  "label": "Порог по надежности теста",
+                  "label": "Порог близости: запрос считается непокрытым при средней близости соседей ниже",
                   "uiComponent": "input",
                   "type": "float",
                   "defaultValue": 0.2
+                },
+                {
+                  "parameter": "uncovered_amber_share",
+                  "label": "Доля непокрытых запросов для жёлтого технического сигнала",
+                  "uiComponent": "input",
+                  "type": "float",
+                  "defaultValue": 0.3
+                },
+                {
+                  "parameter": "uncovered_red_share",
+                  "label": "Доля непокрытых запросов для красного технического сигнала",
+                  "uiComponent": "input",
+                  "type": "float",
+                  "defaultValue": 0.5
+                },
+                {
+                  "parameter": "min_reference_units",
+                  "label": "Минимум единиц эталона",
+                  "uiComponent": "input",
+                  "type": "integer",
+                  "defaultValue": 30
+                },
+                {
+                  "parameter": "min_monitoring_units",
+                  "label": "Минимум единиц мониторинга",
+                  "uiComponent": "input",
+                  "type": "integer",
+                  "defaultValue": 30
                 },
                 {
                   "parameter": "greater_is_better",
@@ -153,7 +167,7 @@
       "in": false,
       "type": "default",
       "shape": "shape_model",
-      "description": "Результаты прохождения теста",
+      "description": "Результаты прохождения теста; тест покрытия потока эталоном (карточка 6.3.7): informative=true, цвет — технический сигнал по доле непокрытых запросов, n_oos/n_oot/n_closest, оценка по соседям как информация",
       "order": 4
     },
     {

@@ -240,9 +240,12 @@ def test_descriptor_defaults_match_runtime_contract():
         "components"
     ]
     defaults = {component["parameter"]: component.get("defaultValue") for component in components}
-    assert defaults["red_threshold"] == 0.25
-    assert defaults["green_threshold"] == 0.15
+    assert "red_threshold" not in defaults and "green_threshold" not in defaults
     assert defaults["reliability_threshold"] == 0.2
+    assert defaults["uncovered_amber_share"] == 0.3
+    assert defaults["uncovered_red_share"] == 0.5
+    assert defaults["min_reference_units"] == 30
+    assert defaults["min_monitoring_units"] == 30
     monitoring_port = next(
         port for port in descriptor["ports"] if port["name"] == "monitoring_umr"
     )
@@ -265,8 +268,9 @@ def test_yellow_semaphore_is_published_as_amber_with_local_drift_title():
     light = result["all_results"]
     assert light["color"] == "amber"
     assert light["calculated_traffic_lights"]["test_light"] == "amber"
-    assert "дрифт" in light["calculated_traffic_lights"]["semaphore_title"].lower()
+    assert "покрытие" in light["calculated_traffic_lights"]["semaphore_title"].lower()
     assert "динамики ключевой метрики" not in light["calculated_traffic_lights"]["semaphore_title"]
+    assert light["informative"] is True
 
 
 def test_gray_verdict_explains_itself():
@@ -281,3 +285,40 @@ def test_gray_verdict_explains_itself():
     light = drift.report_valtest_local_drift(res, drift._SEMAPHORE_TITLE["gray"])["all_results"]
     assert light["status"] == "not_computable"
     assert "OOS" in light["reason"]
+
+
+def test_coverage_colour_depends_only_on_uncovered_share():
+    # Карточка 6.3.7: цвет — технический сигнал по доле непокрытых запросов;
+    # уровень метрики корзины и оценка по соседям цвет не меняют.
+    from llm_val.valtest_local_drift_stability import report_valtest_local_drift_stability
+
+    def colour(share, mean=0.9, estimate=0.2, metric=0.95):
+        stats = {"mean": mean, "median": mean, "q05": mean, "share_below_threshold": share}
+        return report_valtest_local_drift_stability(
+            {"target": metric}, estimate, stats, "target",
+            reliability_threshold=0.2, uncovered_amber=0.3, uncovered_red=0.5,
+        )["semaphore"]
+
+    assert colour(0.0) == "green"          # оценка по соседям 0.2 при корзине 0.95 — не красный
+    assert colour(0.0, metric=0.3) == "green"  # низкий уровень корзины — не жёлтый
+    assert colour(0.31) == "yellow"
+    assert colour(0.0, mean=0.1) == "yellow"
+    assert colour(0.51) == "red"
+
+
+def test_small_monitoring_sample_is_not_assessed_with_reason(monkeypatch):
+    import math
+
+    import main as drift
+
+    res = {"report": {"semaphore": "gray"},
+           "precomputed": {"metric_value": 0.9, "metric_value_estimate": math.nan,
+                           "reliability": {"mean": math.nan, "share_below_threshold": 1.0},
+                           "reason_code": "insufficient_monitoring_units",
+                           "reason": "OOT 3 единиц меньше минимума 30",
+                           "n_oos": 120, "n_oot": 3, "n_closest": None}}
+    light = drift.report_valtest_local_drift(res, drift._SEMAPHORE_TITLE["gray"])["all_results"]
+    assert light["status"] == "not_computable"
+    assert light["reason_code"] == "insufficient_monitoring_units"
+    assert light["reason"] == "OOT 3 единиц меньше минимума 30"
+    assert light["n_oos"] == 120 and light["n_oot"] == 3

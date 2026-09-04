@@ -32,6 +32,7 @@ def _estimate(low_label: float, high_label: float) -> float:
     reference = pd.DataFrame({"question": questions, "answer": "", "target": targets})
     monitoring = pd.DataFrame({"question": questions[:10], "answer": "", "target": None})
     res = valtest_local_drift_stability(
+        min_oos_samples=1, min_oot_samples=1,
         sampler=AutoAsessorSampler(agent_df=monitoring, real_df=reference),
         scorer=AutoAsessorScorer(metrics=METRICS),
         main_metric="target",
