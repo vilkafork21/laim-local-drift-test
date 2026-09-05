@@ -157,7 +157,7 @@
       "in": true,
       "type": "default",
       "shape": "shape_model",
-      "description": "Валидированный контракт laim-monitoring-metric.v2",
+      "description": "Валидированный контракт laim-monitoring-metric.v3",
       "required": true,
       "order": 3
     },
@@ -201,7 +201,8 @@
         "llm_val/valtest_local_drift_stability.py",
         "llm_val/valtest_metric.py",
         "laim_monitoring/__init__.py",
-        "laim_monitoring/core.py"
+        "laim_monitoring/core.py",
+        "measurement.py"
       ],
       "functionName": "main",
       "functionParameters": [],

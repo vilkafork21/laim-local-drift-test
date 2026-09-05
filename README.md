@@ -1,5 +1,13 @@
 # laim-local-drift-test
 
+## Контракт research-dev v3
+
+Нода принимает только подтверждённое определение измерения. Reference и monitoring
+проверяются по `definition_id` и `dataset_role` до построения drift-фреймов.
+Переход v2 → v3 не автоматический: требуется согласованный комплект нод.
+Математический смысл и ограничения алгоритма ниже не переоценивались этим переносом;
+общий статистический и нагрузочный допуск остаётся отдельным этапом исследования.
+
 Тестовая нода мониторингового контура LAIM. Принимает **эталонную корзину**
 (`reference_umr`), **мониторинговые запросы** (`monitoring_umr`) и
 **валидированный контракт метрики** (`monitoring_metric`) и отдаёт в агрегатор
@@ -43,7 +51,7 @@ laim-kriteria-selector.validated_monitoring_metric ─┘         │
 |---|---|---|
 | `reference_umr` | dataframe | Корзина в формате тестового датасета (`laim-umr.v2`): flat-лист (`query_id`, `input_query`, `output_answer`) либо packed-диалог (`session_id`, `dialogue`); обязательна колонка `main_metric` |
 | `monitoring_umr` | dataframe | Выход TDC той же формы без `main_metric`; принимается DataFrame, parquet-bytes или путь к parquet |
-| `monitoring_metric` | default | Контракт `laim-monitoring-metric.v2` (`v1` поднимается автоматически); обязателен `assessment_mode` |
+| `monitoring_metric` | default | Контракт `laim-monitoring-metric.v3` (`v1` поднимается автоматически); обязателен `assessment_mode` |
 
 ### Выходы
 
