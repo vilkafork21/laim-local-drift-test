@@ -55,21 +55,21 @@
                   "label": "Порог красного светофора по метрике",
                   "uiComponent": "input",
                   "type": "float",
-                  "defaultValue": 0.25
+                  "defaultValue": 0.8
                 },
                 {
                   "parameter": "green_threshold",
                   "label": "Порог зеленого светофора по метрике",
                   "uiComponent": "input",
                   "type": "float",
-                  "defaultValue": 0.15
+                  "defaultValue": 0.5
                 },
                 {
                   "parameter": "reliability_threshold",
                   "label": "Порог по надежности теста",
                   "uiComponent": "input",
                   "type": "float",
-                  "defaultValue": 0.2
+                  "defaultValue": 0.7
                 },
                 {
                   "parameter": "greater_is_better",
@@ -187,6 +187,7 @@
       "sourceFiles": [
         "main.py",
         "html_report_helper.py",
+        "html_report.py",
         "config.py",
         "giga_wraper.py",
         "llm_val/ann.py",

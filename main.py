@@ -3,6 +3,7 @@
 """
 
 import logging
+import math
 from ast import literal_eval
 from typing import Any
 
@@ -20,142 +21,64 @@ from llm_val.valtest_local_drift_stability import (
 )
 from laim_monitoring import prepare_drift_frames
 
-from html_report_helper import display_semaphore, show_criteria_semaphore
+from html_report import format_report_number, render_test_report
 
 
 # =============================================================================
 # ФУНКЦИИ ФОРМИРОВАНИЯ ОТЧЕТОВ
 # =============================================================================
 
-def _table_styles():
-    return [
-        {"selector": "th", "props": [
-            ("background-color", "#f5f5f5"),
-            ("text-align", "center"),
-            ("border", "1px solid #ddd"),
-            ("padding", "5px"),
-        ]},
-        {"selector": "td", "props": [
-            ("text-align", "left"),
-            ("border", "1px solid #ddd"),
-            ("padding", "5px"),
-        ]},
-        {"selector": "", "props": [
-            ("border-collapse", "collapse"),
-            ("border", "1px solid black"),
-        ]},
-    ]
 
 
-def html_report_valtest_local_drift(res, semaphore_title):
-    table_styles = _table_styles()
 
-    green_criterion = (
-        "Абсолютное снижение ключевой метрики менее 15 п.п. "
-        "И светофор OOT — «Зелёный»"
-    )
-    yellow_criterion = "Иначе"
-    red_criterion = (
-        "Абсолютное снижение ключевой метрики качества более 25 п.п. "
-        "ИЛИ светофор OOT — «Красный»"
-    )
-    grey_criterion = (
-        "Средний scoreANNi &lt; 0.2 ИЛИ доля непокрытых OOT-запросов &gt; 30%"
-    )
-
-    criterion_df = show_criteria_semaphore(
-        green_criterion, yellow_criterion, red_criterion, grey_criterion, table_styles
-    )
-    criterion_df_html = criterion_df.to_html(border=0, classes="table")
-
-    semaphore_color = res["report"]["semaphore"]
-    semaphore_html = display_semaphore(semaphore_color, return_html=True)
-
+def html_report_valtest_local_drift(res: dict, semaphore_title: str) -> str:
     pre = res["precomputed"]
-    reliability_stats = pre.get("reliability", {})
-    mv = pre.get("metric_value")
-    mve = pre.get("metric_value_estimate")
-
-    def _fmt(v):
-        if v is None:
-            return "n/a"
-        try:
-            if pd.isna(v):
-                return "n/a"
-        except (TypeError, ValueError):
-            pass
-        return f"{float(v):.3f}"
-
-    res_df = pd.DataFrame(
-        {
-            "Показатель": [
-                "Значение метрики на валидации",
-                "Оценка метрики на мониторинге",
-                "Абсолютное снижение",
-                "Надёжность (среднее)",
-                "Надёжность (медиана)",
-                "Надёжность (q05)",
-                "Доля непокрытых запросов",
-                "Результат теста",
-            ],
-            "Значение": [
-                _fmt(mv),
-                _fmt(mve),
-                _fmt(abs(mv - mve)) if (mv is not None and mve is not None and not pd.isna(mve)) else "n/a",
-                _fmt(reliability_stats.get("mean")),
-                _fmt(reliability_stats.get("median")),
-                _fmt(reliability_stats.get("q05")),
-                _fmt(reliability_stats.get("share_below_threshold")),
-                semaphore_html,
-            ],
-        }
+    reliability = pre.get("reliability", {})
+    baseline, current = pre.get("metric_value"), pre.get("metric_value_estimate")
+    delta = baseline - current if baseline is not None and current is not None else None
+    rows = [
+        ("Значение КМ на эталонной корзине (OOS)", format_report_number(baseline)),
+        ("Прогноз КМ по сходству запросов (OOT)", format_report_number(current)),
+        ("Абсолютное снижение D = КМ OOS − КМ OOT", format_report_number(delta)),
+        ("Надёжность: среднее / медиана / 5-й перцентиль близости",
+         " / ".join(format_report_number(reliability.get(key)) for key in ("mean", "median", "q05"))),
+        ("Доля непокрытых запросов", format_report_number(reliability.get("share_below_threshold"), 1, percent=True)),
+        ("Порог близости для покрытия", format_report_number(pre.get("reliability_threshold", 0.7))),
+        ("Пороги снижения D (жёлтый / красный)", " / ".join(format_report_number(v) for v in pre.get("semaphore_threshold", (0.5, 0.8)))),
+        ("Число ближайших соседей N", format_report_number(pre.get("n_closest"), 0)),
+    ]
+    return render_test_report(
+        "6.3.6", "Локальный дрифт запросов",
+        "Оценить ожидаемое качество ответов по семантически ближайшим запросам эталонной корзины "
+        "и выявить долю запросов текущего потока, не покрытых эталоном.",
+        rows, res["report"]["semaphore"],
+        "Положительное снижение означает, что ожидаемая оценка на мониторинге ниже эталонной; "
+        "отрицательное — выше. Высокая доля непокрытых запросов указывает на новые тематики "
+        "и помогает выбрать запросы для дополнительной разметки. Оценка основана на сходстве "
+        "запросов и не использует ответы решения или их оценки Автоасессором за период. Серый результат означает, "
+        "что вывод о дрифте не получен.",
+        f"СЗ выше E; не менее {MIN_OOS_SAMPLES} объектов на эталоне. Метки бинарные "
+        "или непрерывные в известной шкале [0; 1]. Точный поиск по запросам, усечённым до 1000 символов.",
+        "Пороги по умолчанию: зелёный — снижение D < 0,5 и зелёная КМ на эталоне; "
+        "красный — D ≥ 0,8 или красная КМ на эталоне; иначе жёлтый. "
+        "Серый: средняя близость < 0,7, доля непокрытых > 30 %, недостаточно данных "
+        "или неизвестна шкала метрики. Пороги можно скорректировать в настройках.",
+        reason=pre.get("reason") or ("Оценка недоступна или недостаточно надёжна; возможен информационный режим."
+                                    if res["report"]["semaphore"] in ("gray", "grey") else ""),
     )
-
-    try:
-        res_df_to_html = res_df.style.hide().set_table_styles(table_styles)
-    except AttributeError:
-        res_df_to_html = res_df.style.hide_index().set_table_styles(table_styles)
-    res_df_html = res_df_to_html.to_html(border=0, classes="table")
-
-    html_report = f"""
-<h2 style="text-align: center;">Тест на локальный drift запросов</h2>
-<p style="text-align: left;"><b>Цель теста</b></p>
-<p style="text-align: left;">Оценить ключевую метрику качества агента исходя из степени изменения запросов к ней.</p>
-<p style="text-align: left;">При существовании локального дрифта запросов агент должен показывать уровень качества, соизмеримый с качеством на первичной валидации.</p>
-<p style="text-align: left;"><b>Условия проведения</b></p>
-<ul style="text-align: left; margin-left: 20px; padding-left: 20px;">
-    <li>Для СЗ &gt; E</li>
-    <li>Минимум {MIN_OOS_SAMPLES} наблюдений в OOS</li>
-    <li>Метки качества бинарные {{0, 1}} или непрерывные в известном диапазоне</li>
-</ul>
-<p style="text-align: left;"><b>Алгоритм расчёта</b></p>
-<ol style="text-align: left; margin-left: 20px; padding-left: 20px;">
-    <li>Для каждого экземпляра запроса из OOT подбирается N наиболее близких запросов из OOS через ANN на эмбеддингах GigaChat.</li>
-    <li>Ожидаемое качество ответа для OOT-запроса считается по формуле:</li>
-</ol>
-<p style="text-align: left; margin-left: 20px; padding-left: 20px;">
-    score<sub>j</sub> = 0.5 + (1 / (2·N)) · &sum;<sup>N</sup><sub>i=1</sub> scoreANN<sub>i</sub> · target<sub>i</sub><br>
-    где target<sub>i</sub> = {{-1, +1}} для бинарных меток или 2·(y − y<sub>min</sub>)/(y<sub>max</sub> − y<sub>min</sub>) − 1 для непрерывных.
-</p>
-<ol style="text-align: left; margin-left: 20px; padding-left: 20px; counter-reset: list 2;">
-    <li>Финальное качество — среднее score<sub>j</sub> по OOT, ограниченное [0, 1].</li>
-    <li>Надёжность: среднее, медиана, 5-й перцентиль similarity top-N и доля «непокрытых» запросов.</li>
-</ol>
-<p style="text-align: left;"><b>Критерии выставления светофора</b></p>
-<div style="text-align: left; width: 100%;">{criterion_df_html}</div><br>
-<p style="text-align: left;"><b>Результаты теста</b></p>
-<div style="text-align: left; width: 100%;">{res_df_html}</div><br>
-"""
-    return html_report
 
 
 def report_valtest_local_drift(res, semaphore_title):
-    semaphore_color = res["report"]["semaphore"]
+    semaphore_color = {"yellow": "amber", "grey": "gray"}.get(
+        res["report"]["semaphore"], res["report"]["semaphore"])
     html_report = html_report_valtest_local_drift(res, semaphore_title)
     pre = res.get("precomputed", {})
-    metric_value = pre.get("metric_value")
-    metric_estimate = pre.get("metric_value_estimate")
-    reliability = pre.get("reliability", {})
+    def number(value):
+        return float(value) if value is not None and math.isfinite(float(value)) else None
+
+    metric_value = number(pre.get("metric_value"))
+    metric_estimate = number(pre.get("metric_value_estimate"))
+    reliability = {key: number(value) for key, value in pre.get("reliability", {}).items()}
     return {
         "all_results": {
             "calculated_traffic_lights": {
@@ -168,7 +91,7 @@ def report_valtest_local_drift(res, semaphore_title):
             "metric_value": metric_value,
             "metric_value_estimate": metric_estimate,
             "drop_estimate": (
-                abs(metric_value - metric_estimate)
+                metric_value - metric_estimate
                 if metric_value is not None
                 and metric_estimate is not None
                 and not pd.isna(metric_estimate)
@@ -183,10 +106,10 @@ def report_valtest_local_drift(res, semaphore_title):
 
 # P0-3: ключи унифицированы на "gray"
 _SEMAPHORE_TITLE = {
-    "red": "Результат теста динамики ключевой метрики соответствует красному светофору",
-    "green": "Результат теста динамики ключевой метрики соответствует зелёному светофору",
-    "yellow": "Результат теста динамики ключевой метрики соответствует жёлтому светофору",
-    "gray": "Результат теста динамики ключевой метрики не может быть оценён",
+    "red": "Результат теста локального дрифта соответствует красному светофору",
+    "green": "Результат теста локального дрифта соответствует зелёному светофору",
+    "yellow": "Результат теста локального дрифта соответствует жёлтому светофору",
+    "gray": "Результат теста локального дрифта не может быть оценён",
 }
 
 
@@ -202,9 +125,9 @@ def main(
     n_closest: int = 5,
     metric_agg: str = "single_mean",
     data_types: tuple = ("train", "test"),
-    green_threshold: float = 0.15,
-    red_threshold: float = 0.25,
-    reliability_threshold: float = 0.2,
+    green_threshold: float = 0.5,
+    red_threshold: float = 0.8,
+    reliability_threshold: float = 0.7,
     greater_is_better: bool = True,
     is_info: bool = False,
 ):
@@ -213,8 +136,6 @@ def main(
 
     Изменения относительно baseline:
     - P0-3: ключи словарей унифицированы на "gray"
-    - P0-4: reliability_threshold default = 0.2 (как в HTML)
-    - P0-5: red/green defaults = 0.25/0.15 (как в HTML)
     - P0-6: main_metric корректно перезаписывается после rename
     - P1-6: literal_eval защищён от уже-готового dict/tuple
     - P1-7: dropna с subset
@@ -266,6 +187,7 @@ def main(
         test_color=None,
         metric_value_estimate=None,
         reliability_stats=None,
+        metric_scale=monitoring_metric.get("baseline", {}).get("scale"),
     )
     logging.info(res)
 

@@ -10,6 +10,7 @@
 import logging
 import typing as tp
 from copy import deepcopy
+from decimal import Decimal
 
 import numpy as np
 import pandas as pd
@@ -20,7 +21,7 @@ from llm_val.valtest_metric import valtest_metric
 
 
 # Минимальный размер OOS для информативного теста
-MIN_OOS_SAMPLES = 30
+MIN_OOS_SAMPLES = 100
 
 # Адаптивное правило для n_closest по размеру OOS (P2-1)
 def _adaptive_n_closest(n_oos: int, user_n_closest: int) -> int:
@@ -39,8 +40,8 @@ def report_valtest_local_drift_stability(
     main_metric: str,
     test_color: str,
     data_types: tp.Tuple[str, str] = ("train", "test"),
-    semaphore_threshold: tp.Tuple[float, float] = (0.15, 0.25),
-    reliability_threshold: float = 0.2,
+    semaphore_threshold: tp.Tuple[float, float] = (0.5, 0.8),
+    reliability_threshold: float = 0.7,
     greater_is_better: bool = True,
     is_info: bool = False,
 ) -> tp.Dict[str, tp.Any]:
@@ -59,10 +60,11 @@ def report_valtest_local_drift_stability(
         is_info
         or reliability_mean < reliability_threshold
         or reliability_stats.get("share_below_threshold", 0.0) > 0.3
-        or np.isnan(metric_value_estimate)
+        or not np.isfinite(metric_value_estimate)
+        or not np.isfinite(reliability_mean)
     )
 
-    abs_diff = metric_value_estimate - metric_value_scalar
+    abs_diff = float(Decimal(str(metric_value_estimate)) - Decimal(str(metric_value_scalar)))
     if greater_is_better:
         abs_diff = -abs_diff
 
@@ -112,14 +114,15 @@ def valtest_local_drift_stability(
     metric_binarizer: tp.Optional[tp.Callable] = None,
     metric_agg: str = "single_mean",
     data_types: tp.Tuple[str, str] = ("train", "test"),
-    semaphore_threshold: tp.Tuple[float, float] = (0.15, 0.25),
-    reliability_threshold: float = 0.2,
+    semaphore_threshold: tp.Tuple[float, float] = (0.5, 0.8),
+    reliability_threshold: float = 0.7,
     greater_is_better: bool = True,
     is_info: bool = False,
     metric_value: tp.Optional[tp.Dict[str, float]] = None,
     test_color: tp.Optional[str] = None,
     metric_value_estimate: tp.Optional[float] = None,
     reliability_stats: tp.Optional[tp.Dict[str, float]] = None,
+    metric_scale: str = "ratio",
     **kwargs,
 ) -> tp.Dict[str, tp.Any]:
     """
@@ -151,13 +154,23 @@ def valtest_local_drift_stability(
         setattr(sampler_copy, data_types[1],
                 {"X": oot["X"], "y": y_oot_binarized})
 
-    # Размер OOS
     n_oos = len(X_oos)
+    labels = np.asarray(y_oos.values, dtype=float).ravel()
+    reason = None
     if n_oos < MIN_OOS_SAMPLES:
-        logging.warning(f"OOS слишком мал ({n_oos} < {MIN_OOS_SAMPLES}); тест неинформативен")
+        reason = f"Недостаточно объектов OOS: {n_oos} < {MIN_OOS_SAMPLES}"
+    elif len(X_oot) == 0:
+        reason = "Нет запросов мониторинга"
+    elif not np.isfinite(labels).all() or np.any((labels < 0) | (labels > 1)):
+        reason = "Метки OOS должны быть конечными числами в известной шкале [0; 1]"
+    elif metric_scale != "ratio" and not np.isin(labels, [0, 1]).all():
+        reason = "Для непрерывной метрики raw не задан известный диапазон; прогноз не вычисляется"
+    def unavailable(message: str) -> dict:
+        reference_value = metric_value or {main_metric: float(labels.mean()) if labels.size and np.isfinite(labels).all() else np.nan}
+        logging.warning(message)
         empty_stats = {"mean": np.nan, "median": np.nan, "q05": np.nan, "share_below_threshold": 1.0}
         report = report_valtest_local_drift_stability(
-            metric_value or {main_metric: np.nan},
+            reference_value,
             np.nan, empty_stats, main_metric,
             test_color or "gray", data_types, semaphore_threshold,
             reliability_threshold, greater_is_better, is_info=True,
@@ -165,11 +178,15 @@ def valtest_local_drift_stability(
         return {
             "report": report,
             "precomputed": {
-                "metric_value": (metric_value or {main_metric: np.nan})[main_metric],
+                "metric_value": (reference_value)[main_metric],
                 "metric_value_estimate": np.nan,
                 "reliability": empty_stats,
+                "reason": message,
             },
         }
+
+    if reason:
+        return unavailable(reason)
 
     # P2-1: адаптируем n_closest под размер OOS
     n_closest = _adaptive_n_closest(n_oos, n_closest)
@@ -192,8 +209,8 @@ def valtest_local_drift_stability(
         logging.info("Подготовка ANN и эмбеддингов")
 
         # P2-4: фильтруем пустые question
-        oos_q = X_oos["question"].astype(str).tolist()
-        oot_q = X_oot["question"].astype(str).tolist()
+        oos_q = X_oos["question"].astype(str).str.slice(0, 1000).tolist()
+        oot_q = X_oot["question"].astype(str).str.slice(0, 1000).tolist()
         if any(not q.strip() for q in oos_q):
             logging.warning("Некоторые OOS-вопросы пусты; заменяются заглушкой")
             oos_q = [q if q.strip() else "<empty>" for q in oos_q]
@@ -202,30 +219,18 @@ def valtest_local_drift_stability(
             oot_q = [q if q.strip() else "<empty>" for q in oot_q]
 
         oos_embeddings = np.asarray(model.get_embedding(oos_q), dtype=np.float32)
-        if np.isnan(oos_embeddings).any():
-            oos_embeddings = np.nan_to_num(oos_embeddings, nan=0.0)
+        if not np.isfinite(oos_embeddings).all():
+            return unavailable("Эмбеддинги OOS содержат невалидные значения")
 
         # ANN с автоматическим fallback на exact при малой выборке (P1-4 внутри ann.py)
         ann.create_index(oos_embeddings, **ann_config.get("create_index", {}))
 
         oot_embeddings = np.asarray(model.get_embedding(oot_q), dtype=np.float32)
-        if np.isnan(oot_embeddings).any():
-            oot_embeddings = np.nan_to_num(oot_embeddings, nan=0.0)
+        if not np.isfinite(oot_embeddings).all():
+            return unavailable("Эмбеддинги OOT содержат невалидные значения")
 
-        # P0-2: трансформация меток ВНЕ цикла; работаем с numpy (P1-3)
-        # P2-2: для бинарных {0,1} меток → {-1,+1}; для других → центрируем
-        y_oos_arr = np.asarray(y_oos.values, dtype=float).ravel()
-        unique_vals = np.unique(y_oos_arr[~np.isnan(y_oos_arr)])
-        if set(unique_vals.tolist()).issubset({0.0, 1.0}):
-            y_oos_signed = np.where(y_oos_arr == 0, -1.0, 1.0)
-        else:
-            # Центрирование: y' = 2*(y - min)/(max - min) - 1
-            y_min, y_max = float(np.nanmin(y_oos_arr)), float(np.nanmax(y_oos_arr))
-            if y_max > y_min:
-                y_oos_signed = 2.0 * (y_oos_arr - y_min) / (y_max - y_min) - 1.0
-            else:
-                y_oos_signed = np.zeros_like(y_oos_arr)
-            logging.info(f"Не-бинарные метки в диапазоне [{y_min}, {y_max}] — центрирование")
+        # Диапазон [0; 1] задан контрактом, а не минимумом/максимумом выборки.
+        y_oos_signed = 2.0 * labels - 1.0
 
         test_scores: tp.List[float] = []
         reliability_values: tp.List[float] = []
@@ -262,6 +267,9 @@ def valtest_local_drift_stability(
         "metric_value": metric_value[main_metric],
         "metric_value_estimate": metric_value_estimate,
         "reliability": reliability_stats,
+        "n_closest": n_closest,
+        "reliability_threshold": reliability_threshold,
+        "semaphore_threshold": semaphore_threshold,
     }
     report = report_valtest_local_drift_stability(
         metric_value=metric_value,
@@ -275,4 +283,11 @@ def valtest_local_drift_stability(
         greater_is_better=greater_is_better,
         is_info=is_info,
     )
+    if report["semaphore"] == "gray":
+        precomputed["reason"] = (
+            "Информационный режим" if is_info else
+            "Недостаточная надёжность прогноза: средняя близость ниже порога, "
+            "доля непокрытых запросов выше 30 % или оценка невалидна"
+        )
+        logging.warning(precomputed["reason"])
     return {"report": report, "precomputed": precomputed}
