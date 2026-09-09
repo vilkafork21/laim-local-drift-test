@@ -68,5 +68,5 @@ def test_growth_is_not_reported_as_positive_drop():
         "metric_value": 0.69, "metric_value_estimate": 0.75,
     }}
     html = NODE.html_report_valtest_local_drift(payload, "Результат")
-    assert "− КМ OOT" in html and "-0,060" in html
+    assert "Абсолютное снижение D" in html and "-0,060" in html
     assert "Число ближайших соседей N" in html and "Не рассчитано" in html

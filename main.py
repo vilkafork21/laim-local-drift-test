@@ -38,13 +38,12 @@ def html_report_valtest_local_drift(res: dict, semaphore_title: str) -> str:
     delta = baseline - current if baseline is not None and current is not None else None
     rows = [
         ("Значение КМ на эталонной корзине (OOS)", format_report_number(baseline)),
-        ("Прогноз КМ по сходству запросов (OOT)", format_report_number(current)),
-        ("Абсолютное снижение D = КМ OOS − КМ OOT", format_report_number(delta)),
+        ("Оценка КМ на мониторинге (OOT)", format_report_number(current)),
+        ("Абсолютное снижение D", format_report_number(delta)),
         ("Надёжность: среднее / медиана / 5-й перцентиль близости",
          " / ".join(format_report_number(reliability.get(key)) for key in ("mean", "median", "q05"))),
-        ("Доля непокрытых запросов", format_report_number(reliability.get("share_below_threshold"), 1, percent=True)),
-        ("Порог близости для покрытия", format_report_number(pre.get("reliability_threshold", 0.7))),
-        ("Пороги снижения D (жёлтый / красный)", " / ".join(format_report_number(v) for v in pre.get("semaphore_threshold", (0.5, 0.8)))),
+        (f"Доля непокрытых запросов (близость < {format_report_number(pre.get('reliability_threshold', 0.7), 2)})",
+         format_report_number(reliability.get("share_below_threshold"), 1, percent=True)),
         ("Число ближайших соседей N", format_report_number(pre.get("n_closest"), 0)),
     ]
     return render_test_report(
